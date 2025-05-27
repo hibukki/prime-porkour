@@ -1,5 +1,6 @@
 import pygame
 import random
+import os  # For path joining
 
 # Initialize Pygame
 pygame.init()
@@ -10,6 +11,10 @@ SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Prime Porkour")
+
+# Asset loading
+ASSETS_DIR = "assets"
+PLAYER_IMAGE_FILENAME = "pig.png"  # Assuming you have this file
 
 # Colors
 WHITE = (255, 255, 255)
@@ -37,8 +42,22 @@ def is_prime(num):
 class Player(pygame.sprite.Sprite):
     def __init__(self, *groups):
         super().__init__(*groups)
-        self.image = pygame.Surface([50, 40])  # Slightly wider than tall
-        self.image.fill(RED)
+        try:
+            self.original_image = pygame.image.load(
+                os.path.join(ASSETS_DIR, PLAYER_IMAGE_FILENAME)
+            ).convert_alpha()
+            # Scale the image if it's too big/small - let's aim for ~50 pixels height
+            img_width = self.original_image.get_width()
+            img_height = self.original_image.get_height()
+            scale = 50 / img_height
+            self.image = pygame.transform.scale(
+                self.original_image, (int(img_width * scale), 50)
+            )
+        except pygame.error as e:
+            print(f"Error loading player image: {e}. Using fallback rectangle.")
+            self.image = pygame.Surface([50, 50])  # Fallback to red square
+            self.image.fill(RED)
+
         self.rect = self.image.get_rect()
         self.rect.x = SCREEN_WIDTH // 2 - self.rect.width // 2
         self.rect.y = SCREEN_HEIGHT - self.rect.height - 20  # A bit higher from bottom
