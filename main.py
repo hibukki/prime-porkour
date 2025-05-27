@@ -77,16 +77,35 @@ class Player(pygame.sprite.Sprite):
 
 
 class Number(pygame.sprite.Sprite):
-    def __init__(self, value, *groups):
+    def __init__(self, value, existing_numbers_group, *groups):
         super().__init__(*groups)
         self.value = value
         self.is_prime_val = is_prime(self.value)
         color = GREEN if self.is_prime_val else GRAY
         self.image = main_font.render(str(self.value), True, color)
         self.rect = self.image.get_rect()
-        self.rect.x = random.randrange(0, SCREEN_WIDTH - self.rect.width)
-        self.rect.y = random.randrange(-150, -50)  # Start further off-screen
-        self.speed_y = random.randrange(2, 5)  # Slightly faster falling
+
+        # Attempt to avoid horizontal overlap on spawn
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            self.rect.x = random.randrange(0, SCREEN_WIDTH - self.rect.width)
+            self.rect.y = random.randrange(-120, -60)  # Adjusted spawn Y
+
+            # Check for collision with already existing, recently spawned numbers
+            potential_collision = False
+            for num_sprite in existing_numbers_group:
+                # Only check against numbers that are still near the top
+                if (
+                    num_sprite.rect.bottom < FONT_SIZE * 2
+                ):  # Check numbers close to spawn area
+                    if self.rect.colliderect(num_sprite.rect):
+                        potential_collision = True
+                        break
+            if not potential_collision:
+                break  # Found a good spot
+        # If still colliding after max_attempts, just place it randomly (it might overlap)
+
+        self.speed_y = random.randrange(2, 5)
 
     def update(self):
         self.rect.y += self.speed_y
@@ -107,7 +126,7 @@ all_sprites.add(player)
 
 # --- Timers ---
 SPAWN_NUMBER_EVENT = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_NUMBER_EVENT, 800)  # Spawn numbers a bit faster
+pygame.time.set_timer(SPAWN_NUMBER_EVENT, 700)  # Spawn numbers slightly faster
 
 # --- Game Loop ---
 running = True
@@ -164,9 +183,9 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         if not game_over and event.type == SPAWN_NUMBER_EVENT:
-            # Spawn a mix, but try to have more primes occasionally
-            num_val = random.randint(1, 50)  # Wider range for numbers
-            new_number = Number(num_val)
+            num_val = random.randint(1, 50)
+            # Pass the numbers_group to check for overlaps
+            new_number = Number(num_val, numbers_group)
             all_sprites.add(new_number)
             numbers_group.add(new_number)
 
