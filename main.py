@@ -59,8 +59,8 @@ game_over_sound = load_sound(GAME_OVER_SOUND_FILENAME)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)  # Player
-GREEN = (0, 255, 0)  # Prime numbers
-GRAY = (128, 128, 128)  # Non-prime numbers
+# GREEN = (0, 255, 0) # Prime numbers -- REMOVED
+# GRAY = (128, 128, 128) # Non-prime numbers -- REMOVED
 
 # Font
 FONT_SIZE = 36
@@ -111,8 +111,10 @@ class Number(pygame.sprite.Sprite):
         super().__init__(*groups)
         self.value = value
         self.is_prime_val = is_prime(self.value)
-        color = GREEN if self.is_prime_val else GRAY
-        self.image = main_font.render(str(self.value), True, color)
+        # color = GREEN if self.is_prime_val else GRAY -- REMOVED
+        self.image = main_font.render(
+            str(self.value), True, BLACK
+        )  # All numbers are BLACK
         self.rect = self.image.get_rect()
 
         # Attempt to avoid horizontal overlap on spawn
@@ -138,9 +140,15 @@ class Number(pygame.sprite.Sprite):
         self.speed_y = random.randrange(2, 5)
 
     def update(self):
+        global game_over  # Allow modification of global game_over state
         self.rect.y += self.speed_y
         if self.rect.top > SCREEN_HEIGHT:
-            self.kill()  # Remove if it goes off bottom screen
+            if self.is_prime_val:  # If a prime number is missed
+                print(f"Missed PRIME: {self.value}, GAME OVER!")
+                if game_over_sound:
+                    game_over_sound.play()
+                game_over = True
+            self.kill()  # Remove if it goes off bottom
 
 
 # --- Game State Variables ---
@@ -227,15 +235,15 @@ while running:
         collided_numbers = pygame.sprite.spritecollide(player, numbers_group, True)
         for number_sprite in collided_numbers:
             if number_sprite.is_prime_val:
-                score += number_sprite.value  # Add number's value if prime
+                score += number_sprite.value
                 if collect_prime_sound:
                     collect_prime_sound.play()
-                print(f"Collected PRIME: {number_sprite.value}, Score: {score}")
+                # print(f"Collected PRIME: {number_sprite.value}, Score: {score}") # Less verbose console
             else:
                 if game_over_sound:
                     game_over_sound.play()
                 print(f"Collected NON-PRIME: {number_sprite.value}, GAME OVER!")
-                game_over = True  # Game over if non-prime is collected
+                game_over = True
 
         # Draw / Render
         screen.fill(WHITE)
