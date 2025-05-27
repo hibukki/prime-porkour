@@ -24,10 +24,20 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.x = SCREEN_WIDTH // 2 - self.rect.width // 2
         self.rect.y = SCREEN_HEIGHT - self.rect.height - 10  # Start near the bottom
+        self.speed = 5
 
     def update(self):
-        # Player movement logic will go here
-        pass
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            self.rect.x -= self.speed
+        if keys[pygame.K_RIGHT]:
+            self.rect.x += self.speed
+
+        # Keep player on screen
+        if self.rect.left < 0:
+            self.rect.left = 0
+        if self.rect.right > SCREEN_WIDTH:
+            self.rect.right = SCREEN_WIDTH
 
     def draw(self, surface):
         surface.blit(self.image, self.rect)
