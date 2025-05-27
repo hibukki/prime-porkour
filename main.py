@@ -17,6 +17,7 @@ ASSETS_DIR = "assets"
 PLAYER_IMAGE_FILENAME = "pig.png"
 COLLECT_PRIME_SOUND_FILENAME = "collect_prime.wav"
 GAME_OVER_SOUND_FILENAME = "game_over.wav"
+# WIN_SOUND_FILENAME = "win.wav" # Optional: Add a win sound
 
 
 def load_image_scaled(filename, target_height):
@@ -52,11 +53,13 @@ def load_sound_file(filename):
 loaded_player_image = load_image_scaled(PLAYER_IMAGE_FILENAME, 50)
 collect_prime_sound = load_sound_file(COLLECT_PRIME_SOUND_FILENAME)
 game_over_sound = load_sound_file(GAME_OVER_SOUND_FILENAME)
+# win_sound = load_sound_file(WIN_SOUND_FILENAME) # Optional
 
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)  # Player fallback
+GREEN_WIN = (0, 200, 0)  # For win message
 
 # Font
 FONT_SIZE = 36
@@ -72,6 +75,29 @@ PLAYER_JUMP_STRENGTH = -18  # Negative because Y is 0 at top
 # Number spawn heights (y-coordinates)
 NUMBER_LEVEL_BOTTOM_Y = GROUND_Y - 25  # Numbers appear slightly above ground
 NUMBER_LEVEL_TOP_Y = GROUND_Y - 150  # Higher level for numbers
+
+WIN_SCORE = 3000
+
+# Difficulty Scaling Parameters
+INITIAL_SPAWN_DELAY = 1700  # Start a bit slower
+MIN_SPAWN_DELAY = 600
+SPAWN_DELAY_DECREMENT = 75
+
+INITIAL_MIN_NUMBER = 10
+INITIAL_MAX_NUMBER = 99
+MAX_NUMBER_CAP = 500
+MAX_NUMBER_INCREMENT = 30
+
+DIFFICULTY_INCREASE_SCORE_INTERVAL = 200
+
+# --- Game State Variables (initialized in reset_game) ---
+score = 0
+game_over = False
+game_won = False
+current_spawn_delay = INITIAL_SPAWN_DELAY
+current_min_number = INITIAL_MIN_NUMBER
+current_max_number_limit = INITIAL_MAX_NUMBER
+last_difficulty_increase_score = 0
 
 
 # --- Helper Functions ---
@@ -160,10 +186,6 @@ class Number(pygame.sprite.Sprite):
             self.kill()
 
 
-# --- Game State Variables ---
-score = 0
-game_over = False
-
 # --- Sprite Groups ---
 all_sprites = pygame.sprite.Group()
 numbers_group = pygame.sprite.Group()
@@ -211,11 +233,57 @@ def show_game_over_screen():
         clock.tick(15)
 
 
+def show_win_screen():
+    screen.fill(BLACK)
+    win_text_render = main_font.render("!!! YOU WIN !!!", True, GREEN_WIN)
+    final_score_text = main_font.render(f"Final Score: {score}", True, WHITE)
+    restart_text = main_font.render("Press R to Play Again or Q to Quit", True, WHITE)
+    screen.blit(
+        win_text_render,
+        (SCREEN_WIDTH // 2 - win_text_render.get_width() // 2, SCREEN_HEIGHT // 3),
+    )
+    screen.blit(
+        final_score_text,
+        (SCREEN_WIDTH // 2 - final_score_text.get_width() // 2, SCREEN_HEIGHT // 2),
+    )
+    screen.blit(
+        restart_text,
+        (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 50),
+    )
+    pygame.display.flip()
+    # Optional: Play win sound
+    # if win_sound: win_sound.play()
+    waiting_for_input = True
+    while waiting_for_input:
+        for event_loop in pygame.event.get():
+            if event_loop.type == pygame.QUIT:
+                return False
+            if event_loop.type == pygame.KEYDOWN:
+                if event_loop.key == pygame.K_q:
+                    return False
+                if event_loop.key == pygame.K_r:
+                    return True  # Restart
+        clock.tick(15)
+
+
 def reset_game():
-    global score, game_over, player
+    global score, game_over, game_won, player
+    global \
+        current_spawn_delay, \
+        current_min_number, \
+        current_max_number_limit, \
+        last_difficulty_increase_score
+
     score = 0
     game_over = False
-    # No gravity_direction to reset now
+    game_won = False
+
+    current_spawn_delay = INITIAL_SPAWN_DELAY
+    current_min_number = INITIAL_MIN_NUMBER
+    current_max_number_limit = INITIAL_MAX_NUMBER
+    last_difficulty_increase_score = 0
+
+    pygame.time.set_timer(SPAWN_NUMBER_EVENT, current_spawn_delay)
 
     all_sprites.empty()
     numbers_group.empty()
@@ -229,19 +297,19 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-        if not game_over:
+        if not game_over and not game_won:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     player.jump()
 
             if event.type == SPAWN_NUMBER_EVENT:
-                num_val = random.randint(1, 50)
+                num_val = random.randint(current_min_number, current_max_number_limit)
                 level_choice = random.choice(["top", "bottom"])
                 new_number = Number(num_val, level_choice)
                 all_sprites.add(new_number)
                 numbers_group.add(new_number)
 
-    if not game_over:
+    if not game_over and not game_won:
         all_sprites.update()
 
         # Collision detection using masks for pixel-perfect
@@ -253,6 +321,13 @@ while running:
                 score += number_sprite.value
                 if collect_prime_sound:
                     collect_prime_sound.play()
+
+                # Check for win condition
+                if score >= WIN_SCORE:
+                    game_won = True
+                    # Optional: if win_sound: win_sound.play()
+                    print("YOU WIN!")
+                    break  # Stop processing further collisions this frame
             else:
                 if game_over_sound:
                     game_over_sound.play()
@@ -267,6 +342,33 @@ while running:
                 reset_game()
             continue  # Skip drawing the main game if game over screen is shown
 
+        # Difficulty Progression (if game is still active)
+        if (
+            not game_over and not game_won
+        ):  # Re-check because collision might have ended game
+            if (
+                score - last_difficulty_increase_score
+                >= DIFFICULTY_INCREASE_SCORE_INTERVAL
+            ):
+                last_difficulty_increase_score = score
+
+                # Increase spawn rate
+                current_spawn_delay = max(
+                    MIN_SPAWN_DELAY, current_spawn_delay - SPAWN_DELAY_DECREMENT
+                )
+                pygame.time.set_timer(SPAWN_NUMBER_EVENT, current_spawn_delay)
+                print(f"Difficulty UP! Spawn delay: {current_spawn_delay}ms")
+
+                # Increase number range
+                current_max_number_limit = min(
+                    MAX_NUMBER_CAP, current_max_number_limit + MAX_NUMBER_INCREMENT
+                )
+                # Ensure min_number doesn't exceed max_number_limit if it were also dynamic
+                # For now, min_number is fixed at 10 for two-digit start
+                print(
+                    f"Difficulty UP! Number range: {current_min_number}-{current_max_number_limit}"
+                )
+
         # Draw / Render
         screen.fill(WHITE)
         # Draw a simple ground line
@@ -278,10 +380,16 @@ while running:
 
         pygame.display.flip()
     else:
-        if not show_game_over_screen():
-            running = False
+        if game_won:
+            if not show_win_screen():
+                running = False
+            else:
+                reset_game()
         else:
-            reset_game()
+            if not show_game_over_screen():
+                running = False
+            else:
+                reset_game()
 
     clock.tick(60)
 
