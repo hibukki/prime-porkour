@@ -66,6 +66,9 @@ RED = (255, 0, 0)  # Player
 FONT_SIZE = 36
 main_font = pygame.font.SysFont(None, FONT_SIZE)
 
+# --- Game Configuration ---
+gravity_direction = 1  # 1 for down, -1 for up
+
 
 # --- Helper Functions ---
 def is_prime(num):
@@ -111,44 +114,58 @@ class Number(pygame.sprite.Sprite):
         super().__init__(*groups)
         self.value = value
         self.is_prime_val = is_prime(self.value)
-        # color = GREEN if self.is_prime_val else GRAY -- REMOVED
-        self.image = main_font.render(
-            str(self.value), True, BLACK
-        )  # All numbers are BLACK
+        self.image = main_font.render(str(self.value), True, BLACK)
         self.rect = self.image.get_rect()
 
-        # Attempt to avoid horizontal overlap on spawn
         max_attempts = 10
-        for attempt in range(max_attempts):
+        for _ in range(max_attempts):
             self.rect.x = random.randrange(0, SCREEN_WIDTH - self.rect.width)
-            self.rect.y = random.randrange(-120, -60)  # Adjusted spawn Y
+            if gravity_direction == 1:
+                self.rect.y = random.randrange(-120, -60)  # Spawn at top
+            else:  # gravity_direction == -1
+                self.rect.y = random.randrange(
+                    SCREEN_HEIGHT + 60, SCREEN_HEIGHT + 120
+                )  # Spawn at bottom
 
-            # Check for collision with already existing, recently spawned numbers
             potential_collision = False
             for num_sprite in existing_numbers_group:
-                # Only check against numbers that are still near the top
-                if (
-                    num_sprite.rect.bottom < FONT_SIZE * 2
-                ):  # Check numbers close to spawn area
+                # Adjust collision check based on spawn area
+                if gravity_direction == 1 and num_sprite.rect.bottom < FONT_SIZE * 2:
+                    if self.rect.colliderect(num_sprite.rect):
+                        potential_collision = True
+                        break
+                elif (
+                    gravity_direction == -1
+                    and num_sprite.rect.top > SCREEN_HEIGHT - FONT_SIZE * 2
+                ):
                     if self.rect.colliderect(num_sprite.rect):
                         potential_collision = True
                         break
             if not potential_collision:
-                break  # Found a good spot
-        # If still colliding after max_attempts, just place it randomly (it might overlap)
+                break
 
-        self.speed_y = random.randrange(2, 5)
+        self.speed_y = random.randrange(2, 5)  # Absolute speed
 
     def update(self):
-        global game_over  # Allow modification of global game_over state
-        self.rect.y += self.speed_y
-        if self.rect.top > SCREEN_HEIGHT:
-            if self.is_prime_val:  # If a prime number is missed
-                print(f"Missed PRIME: {self.value}, GAME OVER!")
+        global game_over, score  # Allow modification of global game_over state
+        self.rect.y += self.speed_y * gravity_direction
+
+        # Check if off-screen (top or bottom depending on gravity)
+        is_off_screen = False
+        if gravity_direction == 1 and self.rect.top > SCREEN_HEIGHT:
+            is_off_screen = True
+        elif gravity_direction == -1 and self.rect.bottom < 0:
+            is_off_screen = True
+
+        if is_off_screen:
+            if self.is_prime_val:  # If a prime number is missed (either direction)
+                print(
+                    f"Missed PRIME: {self.value} (gravity: {gravity_direction}), GAME OVER!"
+                )
                 if game_over_sound:
                     game_over_sound.play()
                 game_over = True
-            self.kill()  # Remove if it goes off bottom
+            self.kill()
 
 
 # --- Game State Variables ---
@@ -164,7 +181,10 @@ all_sprites.add(player)
 
 # --- Timers ---
 SPAWN_NUMBER_EVENT = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_NUMBER_EVENT, 700)  # Spawn numbers slightly faster
+pygame.time.set_timer(SPAWN_NUMBER_EVENT, 700)
+
+GRAVITY_FLIP_EVENT = pygame.USEREVENT + 2
+pygame.time.set_timer(GRAVITY_FLIP_EVENT, 15000)  # Flip gravity every 15 seconds
 
 # --- Game Loop ---
 running = True
@@ -205,9 +225,10 @@ def show_game_over_screen():
 
 
 def reset_game():
-    global score, game_over, all_sprites, numbers_group, player
+    global score, game_over, all_sprites, numbers_group, player, gravity_direction
     score = 0
     game_over = False
+    gravity_direction = 1  # Reset gravity to normal
 
     all_sprites.empty()
     numbers_group.empty()
@@ -220,12 +241,19 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        if not game_over and event.type == SPAWN_NUMBER_EVENT:
-            num_val = random.randint(1, 50)
-            # Pass the numbers_group to check for overlaps
-            new_number = Number(num_val, numbers_group)
-            all_sprites.add(new_number)
-            numbers_group.add(new_number)
+
+        if not game_over:
+            if event.type == SPAWN_NUMBER_EVENT:
+                num_val = random.randint(1, 50)
+                new_number = Number(num_val, numbers_group)
+                all_sprites.add(new_number)
+                numbers_group.add(new_number)
+            if event.type == GRAVITY_FLIP_EVENT:
+                gravity_direction *= -1
+                print(f"GRAVITY FLIPPED! Direction: {gravity_direction}")
+                # Optional: Clear existing numbers when gravity flips to avoid confusion
+                # for num in numbers_group:
+                #    num.kill()
 
     if not game_over:
         # Update
