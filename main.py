@@ -5,8 +5,6 @@ import os  # For path joining
 # Initialize Pygame (mixer specifically for sound)
 pygame.mixer.pre_init(44100, -16, 2, 512)  # Optimize buffer for less delay
 pygame.init()
-pygame.font.init()
-pygame.mixer.init()
 
 # Screen dimensions
 SCREEN_WIDTH = 800
@@ -16,26 +14,46 @@ pygame.display.set_caption("Prime Porkour")
 
 # Asset loading
 ASSETS_DIR = "assets"
-PLAYER_IMAGE_FILENAME = "pig.png"  # Assuming you have this file
+PLAYER_IMAGE_FILENAME = "pig.png"
 COLLECT_PRIME_SOUND_FILENAME = "collect_prime.wav"
 GAME_OVER_SOUND_FILENAME = "game_over.wav"
 
-# Attempt to load sounds
+# Attempt to load player image
 try:
-    collect_prime_sound = pygame.mixer.Sound(
-        os.path.join(ASSETS_DIR, COLLECT_PRIME_SOUND_FILENAME)
+    player_image_path = os.path.join(ASSETS_DIR, PLAYER_IMAGE_FILENAME)
+    # Check if file exists before attempting to load, to give a clearer custom message
+    if not os.path.exists(player_image_path):
+        raise FileNotFoundError(f"Player image not found at: {player_image_path}")
+    original_player_image = pygame.image.load(player_image_path).convert_alpha()
+    # Scale the image
+    img_width = original_player_image.get_width()
+    img_height = original_player_image.get_height()
+    scale = 50 / img_height  # Target height of 50px
+    loaded_player_image = pygame.transform.scale(
+        original_player_image, (int(img_width * scale), 50)
     )
-except pygame.error as e:
-    print(f"Error loading {COLLECT_PRIME_SOUND_FILENAME}: {e}")
-    collect_prime_sound = None
+except (pygame.error, FileNotFoundError) as e:
+    print(
+        f"Error loading player image '{PLAYER_IMAGE_FILENAME}': {e}. Using fallback rectangle."
+    )
+    loaded_player_image = None  # Will be handled in Player class
 
-try:
-    game_over_sound = pygame.mixer.Sound(
-        os.path.join(ASSETS_DIR, GAME_OVER_SOUND_FILENAME)
-    )
-except pygame.error as e:
-    print(f"Error loading {GAME_OVER_SOUND_FILENAME}: {e}")
-    game_over_sound = None
+
+# Attempt to load sounds
+def load_sound(filename):
+    sound_path = os.path.join(ASSETS_DIR, filename)
+    try:
+        if not os.path.exists(sound_path):
+            raise FileNotFoundError(f"Sound file not found at: {sound_path}")
+        sound = pygame.mixer.Sound(sound_path)
+        return sound
+    except (pygame.error, FileNotFoundError) as e:
+        print(f"Error loading sound '{filename}': {e}. Sound will not play.")
+        return None
+
+
+collect_prime_sound = load_sound(COLLECT_PRIME_SOUND_FILENAME)
+game_over_sound = load_sound(GAME_OVER_SOUND_FILENAME)
 
 # Colors
 WHITE = (255, 255, 255)
@@ -63,20 +81,11 @@ def is_prime(num):
 class Player(pygame.sprite.Sprite):
     def __init__(self, *groups):
         super().__init__(*groups)
-        try:
-            self.original_image = pygame.image.load(
-                os.path.join(ASSETS_DIR, PLAYER_IMAGE_FILENAME)
-            ).convert_alpha()
-            # Scale the image if it's too big/small - let's aim for ~50 pixels height
-            img_width = self.original_image.get_width()
-            img_height = self.original_image.get_height()
-            scale = 50 / img_height
-            self.image = pygame.transform.scale(
-                self.original_image, (int(img_width * scale), 50)
-            )
-        except pygame.error as e:
-            print(f"Error loading player image: {e}. Using fallback rectangle.")
-            self.image = pygame.Surface([50, 50])  # Fallback to red square
+        if loaded_player_image:
+            self.image = loaded_player_image
+        else:
+            # Fallback if image loading failed
+            self.image = pygame.Surface([50, 50])
             self.image.fill(RED)
 
         self.rect = self.image.get_rect()
