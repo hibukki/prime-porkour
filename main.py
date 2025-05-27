@@ -1,73 +1,77 @@
 import pygame
 import random
-import os  # For path joining
+import os
 
-# Initialize Pygame (mixer specifically for sound)
-pygame.mixer.pre_init(44100, -16, 2, 512)  # Optimize buffer for less delay
+# Initialize Pygame
+pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 
 # Screen dimensions
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Prime Porkour")
+pygame.display.set_caption("Prime Porkour - Platformer")
 
-# Asset loading
+# Asset loading (paths and fallback handling)
 ASSETS_DIR = "assets"
 PLAYER_IMAGE_FILENAME = "pig.png"
 COLLECT_PRIME_SOUND_FILENAME = "collect_prime.wav"
 GAME_OVER_SOUND_FILENAME = "game_over.wav"
 
-# Attempt to load player image
-try:
-    player_image_path = os.path.join(ASSETS_DIR, PLAYER_IMAGE_FILENAME)
-    # Check if file exists before attempting to load, to give a clearer custom message
-    if not os.path.exists(player_image_path):
-        raise FileNotFoundError(f"Player image not found at: {player_image_path}")
-    original_player_image = pygame.image.load(player_image_path).convert_alpha()
-    # Scale the image
-    img_width = original_player_image.get_width()
-    img_height = original_player_image.get_height()
-    scale = 50 / img_height  # Target height of 50px
-    loaded_player_image = pygame.transform.scale(
-        original_player_image, (int(img_width * scale), 50)
-    )
-except (pygame.error, FileNotFoundError) as e:
-    print(
-        f"Error loading player image '{PLAYER_IMAGE_FILENAME}': {e}. Using fallback rectangle."
-    )
-    loaded_player_image = None  # Will be handled in Player class
 
-
-# Attempt to load sounds
-def load_sound(filename):
-    sound_path = os.path.join(ASSETS_DIR, filename)
+def load_image_scaled(filename, target_height):
     try:
-        if not os.path.exists(sound_path):
-            raise FileNotFoundError(f"Sound file not found at: {sound_path}")
-        sound = pygame.mixer.Sound(sound_path)
-        return sound
+        image_path = os.path.join(ASSETS_DIR, filename)
+        if not os.path.exists(image_path):
+            # print(f"Image not found: {image_path}. Using fallback.") # Less verbose
+            return None
+        original_image = pygame.image.load(image_path).convert_alpha()
+        img_width = original_image.get_width()
+        img_height = original_image.get_height()
+        scale = target_height / img_height
+        return pygame.transform.scale(
+            original_image, (int(img_width * scale), target_height)
+        )
     except (pygame.error, FileNotFoundError) as e:
-        print(f"Error loading sound '{filename}': {e}. Sound will not play.")
+        print(f"Error loading image '{filename}': {e}. Using fallback.")
         return None
 
 
-collect_prime_sound = load_sound(COLLECT_PRIME_SOUND_FILENAME)
-game_over_sound = load_sound(GAME_OVER_SOUND_FILENAME)
+def load_sound_file(filename):
+    sound_path = os.path.join(ASSETS_DIR, filename)
+    try:
+        if not os.path.exists(sound_path):
+            # print(f"Sound file not found: {sound_path}") # Less verbose
+            return None
+        return pygame.mixer.Sound(sound_path)
+    except (pygame.error, FileNotFoundError) as e:
+        print(f"Error loading sound '{filename}': {e}.")
+        return None
+
+
+loaded_player_image = load_image_scaled(PLAYER_IMAGE_FILENAME, 50)
+collect_prime_sound = load_sound_file(COLLECT_PRIME_SOUND_FILENAME)
+game_over_sound = load_sound_file(GAME_OVER_SOUND_FILENAME)
 
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (255, 0, 0)  # Player
-# GREEN = (0, 255, 0) # Prime numbers -- REMOVED
-# GRAY = (128, 128, 128) # Non-prime numbers -- REMOVED
+RED = (255, 0, 0)  # Player fallback
 
 # Font
 FONT_SIZE = 36
 main_font = pygame.font.SysFont(None, FONT_SIZE)
 
 # --- Game Configuration ---
-gravity_direction = 1  # 1 for down, -1 for up
+GROUND_Y = SCREEN_HEIGHT - 80  # Y-coordinate for the ground
+PLAYER_START_X = 100
+NUMBER_SPEED = 3
+PLAYER_GRAVITY = 0.8
+PLAYER_JUMP_STRENGTH = -18  # Negative because Y is 0 at top
+
+# Number spawn heights (y-coordinates)
+NUMBER_LEVEL_BOTTOM_Y = GROUND_Y - 25  # Numbers appear slightly above ground
+NUMBER_LEVEL_TOP_Y = GROUND_Y - 150  # Higher level for numbers
 
 
 # --- Helper Functions ---
@@ -86,23 +90,40 @@ class Player(pygame.sprite.Sprite):
         super().__init__(*groups)
         if loaded_player_image:
             self.image = loaded_player_image
+            self.mask = pygame.mask.from_surface(self.image)
         else:
-            # Fallback if image loading failed
-            self.image = pygame.Surface([50, 50])
+            self.image = pygame.Surface([40, 50])
             self.image.fill(RED)
+            self.mask = pygame.mask.from_surface(self.image)
 
         self.rect = self.image.get_rect()
-        self.rect.x = SCREEN_WIDTH // 2 - self.rect.width // 2
-        self.rect.y = SCREEN_HEIGHT - self.rect.height - 20  # A bit higher from bottom
-        self.speed = 7  # Increased speed
+        self.rect.x = PLAYER_START_X
+        # Store a float for precise vertical position
+        self.y_float = float(GROUND_Y - self.rect.height)
+        self.rect.bottom = GROUND_Y  # Initial rect bottom position
+
+        self.vy = 0  # Vertical velocity
+        self.on_ground = True
+
+    def jump(self):
+        if self.on_ground:
+            self.vy = PLAYER_JUMP_STRENGTH
+            self.on_ground = False
 
     def update(self):
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT]:
-            self.rect.x -= self.speed
-        if keys[pygame.K_RIGHT]:
-            self.rect.x += self.speed
+        # Apply player gravity
+        self.vy += PLAYER_GRAVITY
+        self.y_float += self.vy
+        self.rect.y = int(self.y_float)  # Update rect with integer part
 
+        # Check for ground collision
+        if self.rect.bottom >= GROUND_Y:
+            self.rect.bottom = GROUND_Y
+            self.y_float = float(self.rect.y)  # Sync float position with rect
+            self.vy = 0
+            self.on_ground = True
+
+        # Keep player on screen horizontally (optional, can be fixed)
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > SCREEN_WIDTH:
@@ -110,58 +131,29 @@ class Player(pygame.sprite.Sprite):
 
 
 class Number(pygame.sprite.Sprite):
-    def __init__(self, value, existing_numbers_group, *groups):
+    def __init__(self, value, level, *groups):
         super().__init__(*groups)
         self.value = value
         self.is_prime_val = is_prime(self.value)
         self.image = main_font.render(str(self.value), True, BLACK)
         self.rect = self.image.get_rect()
+        self.mask = pygame.mask.from_surface(self.image)  # For pixel-perfect collision
 
-        max_attempts = 10
-        for _ in range(max_attempts):
-            self.rect.x = random.randrange(0, SCREEN_WIDTH - self.rect.width)
-            if gravity_direction == 1:
-                self.rect.y = random.randrange(-120, -60)  # Spawn at top
-            else:  # gravity_direction == -1
-                self.rect.y = random.randrange(
-                    SCREEN_HEIGHT + 60, SCREEN_HEIGHT + 120
-                )  # Spawn at bottom
+        self.rect.x = SCREEN_WIDTH + random.randrange(50, 200)  # Spawn off-screen right
+        if level == "top":
+            self.rect.centery = NUMBER_LEVEL_TOP_Y
+        else:  # bottom
+            self.rect.centery = NUMBER_LEVEL_BOTTOM_Y
 
-            potential_collision = False
-            for num_sprite in existing_numbers_group:
-                # Adjust collision check based on spawn area
-                if gravity_direction == 1 and num_sprite.rect.bottom < FONT_SIZE * 2:
-                    if self.rect.colliderect(num_sprite.rect):
-                        potential_collision = True
-                        break
-                elif (
-                    gravity_direction == -1
-                    and num_sprite.rect.top > SCREEN_HEIGHT - FONT_SIZE * 2
-                ):
-                    if self.rect.colliderect(num_sprite.rect):
-                        potential_collision = True
-                        break
-            if not potential_collision:
-                break
-
-        self.speed_y = random.randrange(2, 5)  # Absolute speed
+        self.speed_x = NUMBER_SPEED
 
     def update(self):
-        global game_over, score  # Allow modification of global game_over state
-        self.rect.y += self.speed_y * gravity_direction
+        global game_over
+        self.rect.x -= self.speed_x
 
-        # Check if off-screen (top or bottom depending on gravity)
-        is_off_screen = False
-        if gravity_direction == 1 and self.rect.top > SCREEN_HEIGHT:
-            is_off_screen = True
-        elif gravity_direction == -1 and self.rect.bottom < 0:
-            is_off_screen = True
-
-        if is_off_screen:
-            if self.is_prime_val:  # If a prime number is missed (either direction)
-                print(
-                    f"Missed PRIME: {self.value} (gravity: {gravity_direction}), GAME OVER!"
-                )
+        if self.rect.right < 0:  # Number has scrolled off screen to the left
+            if self.is_prime_val:
+                print(f"Missed PRIME by scrolling: {self.value}, GAME OVER!")
                 if game_over_sound:
                     game_over_sound.play()
                 game_over = True
@@ -181,10 +173,7 @@ all_sprites.add(player)
 
 # --- Timers ---
 SPAWN_NUMBER_EVENT = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_NUMBER_EVENT, 700)
-
-GRAVITY_FLIP_EVENT = pygame.USEREVENT + 2
-pygame.time.set_timer(GRAVITY_FLIP_EVENT, 15000)  # Flip gravity every 15 seconds
+pygame.time.set_timer(SPAWN_NUMBER_EVENT, 1500)  # Adjust spawn rate as needed
 
 # --- Game Loop ---
 running = True
@@ -196,7 +185,6 @@ def show_game_over_screen():
     game_over_text = main_font.render("GAME OVER", True, RED)
     score_text_render = main_font.render(f"Final Score: {score}", True, WHITE)
     restart_text = main_font.render("Press R to Restart or Q to Quit", True, WHITE)
-
     screen.blit(
         game_over_text,
         (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2, SCREEN_HEIGHT // 3),
@@ -210,25 +198,24 @@ def show_game_over_screen():
         (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 50),
     )
     pygame.display.flip()
-
     waiting_for_input = True
     while waiting_for_input:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return False  # Quit game
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_q:
-                    return False  # Quit game
-                if event.key == pygame.K_r:
-                    return True  # Restart game
+        for event_loop in pygame.event.get():
+            if event_loop.type == pygame.QUIT:
+                return False
+            if event_loop.type == pygame.KEYDOWN:
+                if event_loop.key == pygame.K_q:
+                    return False
+                if event_loop.key == pygame.K_r:
+                    return True
         clock.tick(15)
 
 
 def reset_game():
-    global score, game_over, all_sprites, numbers_group, player, gravity_direction
+    global score, game_over, player
     score = 0
     game_over = False
-    gravity_direction = 1  # Reset gravity to normal
+    # No gravity_direction to reset now
 
     all_sprites.empty()
     numbers_group.empty()
@@ -243,38 +230,47 @@ while running:
             running = False
 
         if not game_over:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    player.jump()
+
             if event.type == SPAWN_NUMBER_EVENT:
                 num_val = random.randint(1, 50)
-                new_number = Number(num_val, numbers_group)
+                level_choice = random.choice(["top", "bottom"])
+                new_number = Number(num_val, level_choice)
                 all_sprites.add(new_number)
                 numbers_group.add(new_number)
-            if event.type == GRAVITY_FLIP_EVENT:
-                gravity_direction *= -1
-                print(f"GRAVITY FLIPPED! Direction: {gravity_direction}")
-                # Optional: Clear existing numbers when gravity flips to avoid confusion
-                # for num in numbers_group:
-                #    num.kill()
 
     if not game_over:
-        # Update
         all_sprites.update()
 
-        # Check for collisions
-        collided_numbers = pygame.sprite.spritecollide(player, numbers_group, True)
+        # Collision detection using masks for pixel-perfect
+        collided_numbers = pygame.sprite.spritecollide(
+            player, numbers_group, True, pygame.sprite.collide_mask
+        )
         for number_sprite in collided_numbers:
             if number_sprite.is_prime_val:
                 score += number_sprite.value
                 if collect_prime_sound:
                     collect_prime_sound.play()
-                # print(f"Collected PRIME: {number_sprite.value}, Score: {score}") # Less verbose console
             else:
                 if game_over_sound:
                     game_over_sound.play()
                 print(f"Collected NON-PRIME: {number_sprite.value}, GAME OVER!")
                 game_over = True
+                break  # Stop checking collisions if game over
+
+        if game_over:  # Check again in case collision caused game over
+            if not show_game_over_screen():
+                running = False
+            else:
+                reset_game()
+            continue  # Skip drawing the main game if game over screen is shown
 
         # Draw / Render
         screen.fill(WHITE)
+        # Draw a simple ground line
+        pygame.draw.line(screen, BLACK, (0, GROUND_Y), (SCREEN_WIDTH, GROUND_Y), 2)
         all_sprites.draw(screen)
 
         score_display = main_font.render(f"Score: {score}", True, BLACK)
@@ -282,12 +278,11 @@ while running:
 
         pygame.display.flip()
     else:
-        if not show_game_over_screen():  # Returns False if Q is pressed
+        if not show_game_over_screen():
             running = False
-        else:  # Returns True if R is pressed
+        else:
             reset_game()
 
     clock.tick(60)
 
-# Quit Pygame
 pygame.quit()
