@@ -1,8 +1,9 @@
 import pygame
-import random  # For generating random numbers
+import random
 
 # Initialize Pygame
 pygame.init()
+pygame.font.init()
 
 # Screen dimensions
 SCREEN_WIDTH = 800
@@ -13,12 +14,13 @@ pygame.display.set_caption("Prime Porkour")
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)  # For numbers
+RED = (255, 0, 0)  # Player
+GREEN = (0, 255, 0)  # Prime numbers
+GRAY = (128, 128, 128)  # Non-prime numbers
 
-# Font for displaying numbers
-pygame.font.init()  # Initialize font module
-number_font = pygame.font.SysFont(None, 36)
+# Font
+FONT_SIZE = 36
+main_font = pygame.font.SysFont(None, FONT_SIZE)
 
 
 # --- Helper Functions ---
@@ -35,12 +37,12 @@ def is_prime(num):
 class Player(pygame.sprite.Sprite):
     def __init__(self, *groups):
         super().__init__(*groups)
-        self.image = pygame.Surface([50, 50])
+        self.image = pygame.Surface([50, 40])  # Slightly wider than tall
         self.image.fill(RED)
         self.rect = self.image.get_rect()
         self.rect.x = SCREEN_WIDTH // 2 - self.rect.width // 2
-        self.rect.y = SCREEN_HEIGHT - self.rect.height - 10
-        self.speed = 5
+        self.rect.y = SCREEN_HEIGHT - self.rect.height - 20  # A bit higher from bottom
+        self.speed = 7  # Increased speed
 
     def update(self):
         keys = pygame.key.get_pressed()
@@ -54,78 +56,128 @@ class Player(pygame.sprite.Sprite):
         if self.rect.right > SCREEN_WIDTH:
             self.rect.right = SCREEN_WIDTH
 
-    def draw(self, surface):
-        surface.blit(self.image, self.rect)
-
 
 class Number(pygame.sprite.Sprite):
-    def __init__(self, value):
-        super().__init__()
+    def __init__(self, value, *groups):
+        super().__init__(*groups)
         self.value = value
-        self.image = number_font.render(str(self.value), True, BLACK)
+        self.is_prime_val = is_prime(self.value)
+        color = GREEN if self.is_prime_val else GRAY
+        self.image = main_font.render(str(self.value), True, color)
         self.rect = self.image.get_rect()
-        self.rect.x = random.randrange(SCREEN_WIDTH - self.rect.width)
-        self.rect.y = random.randrange(-100, -40)  # Start off-screen
-        self.speed_y = random.randrange(1, 4)  # Falling speed
+        self.rect.x = random.randrange(0, SCREEN_WIDTH - self.rect.width)
+        self.rect.y = random.randrange(-150, -50)  # Start further off-screen
+        self.speed_y = random.randrange(2, 5)  # Slightly faster falling
 
     def update(self):
         self.rect.y += self.speed_y
-        if self.rect.top > SCREEN_HEIGHT + 10:  # Remove if it goes off bottom
-            self.kill()
-
-    def draw(self, surface):
-        surface.blit(self.image, self.rect)
+        if self.rect.top > SCREEN_HEIGHT:
+            self.kill()  # Remove if it goes off bottom screen
 
 
-# --- Game Setup ---
-player = Player()
+# --- Game State Variables ---
+score = 0
+game_over = False
+
+# --- Sprite Groups ---
 all_sprites = pygame.sprite.Group()
-numbers_group = pygame.sprite.Group()  # Group for numbers
+numbers_group = pygame.sprite.Group()
+
+player = Player()
 all_sprites.add(player)
 
-# Timer for spawning numbers
+# --- Timers ---
 SPAWN_NUMBER_EVENT = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_NUMBER_EVENT, 1000)  # Spawn a new number every 1 second
+pygame.time.set_timer(SPAWN_NUMBER_EVENT, 800)  # Spawn numbers a bit faster
 
 # --- Game Loop ---
 running = True
 clock = pygame.time.Clock()
-score = 0
+
+
+def show_game_over_screen():
+    screen.fill(BLACK)
+    game_over_text = main_font.render("GAME OVER", True, RED)
+    score_text_render = main_font.render(f"Final Score: {score}", True, WHITE)
+    restart_text = main_font.render("Press R to Restart or Q to Quit", True, WHITE)
+
+    screen.blit(
+        game_over_text,
+        (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2, SCREEN_HEIGHT // 3),
+    )
+    screen.blit(
+        score_text_render,
+        (SCREEN_WIDTH // 2 - score_text_render.get_width() // 2, SCREEN_HEIGHT // 2),
+    )
+    screen.blit(
+        restart_text,
+        (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, SCREEN_HEIGHT // 2 + 50),
+    )
+    pygame.display.flip()
+
+    waiting_for_input = True
+    while waiting_for_input:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False  # Quit game
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_q:
+                    return False  # Quit game
+                if event.key == pygame.K_r:
+                    return True  # Restart game
+        clock.tick(15)
+
+
+def reset_game():
+    global score, game_over, all_sprites, numbers_group, player
+    score = 0
+    game_over = False
+
+    all_sprites.empty()
+    numbers_group.empty()
+
+    player = Player()
+    all_sprites.add(player)
+
 
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        if event.type == SPAWN_NUMBER_EVENT:
-            # For now, spawn a mix of prime and non-prime numbers
-            # We'll refine this later to be more game-like
-            num_val = random.randint(1, 30)
+        if not game_over and event.type == SPAWN_NUMBER_EVENT:
+            # Spawn a mix, but try to have more primes occasionally
+            num_val = random.randint(1, 50)  # Wider range for numbers
             new_number = Number(num_val)
             all_sprites.add(new_number)
             numbers_group.add(new_number)
 
-    # Update
-    all_sprites.update()
+    if not game_over:
+        # Update
+        all_sprites.update()
 
-    # Check for collisions between player and numbers
-    # For now, let's say collecting any number gives a point
-    # We will differentiate prime/non-prime later
-    collided_numbers = pygame.sprite.spritecollide(
-        player, numbers_group, True
-    )  # True to remove collided sprite
-    for number_sprite in collided_numbers:
-        score += 1  # Just a placeholder for now
-        print(f"Collected: {number_sprite.value}, Score: {score}")
+        # Check for collisions
+        collided_numbers = pygame.sprite.spritecollide(player, numbers_group, True)
+        for number_sprite in collided_numbers:
+            if number_sprite.is_prime_val:
+                score += number_sprite.value  # Add number's value if prime
+                print(f"Collected PRIME: {number_sprite.value}, Score: {score}")
+            else:
+                print(f"Collected NON-PRIME: {number_sprite.value}, GAME OVER!")
+                game_over = True  # Game over if non-prime is collected
 
-    # Draw / Render
-    screen.fill(WHITE)
-    all_sprites.draw(screen)
+        # Draw / Render
+        screen.fill(WHITE)
+        all_sprites.draw(screen)
 
-    # Display score
-    score_text = number_font.render(f"Score: {score}", True, BLACK)
-    screen.blit(score_text, (10, 10))
+        score_display = main_font.render(f"Score: {score}", True, BLACK)
+        screen.blit(score_display, (10, 10))
 
-    pygame.display.flip()
+        pygame.display.flip()
+    else:
+        if not show_game_over_screen():  # Returns False if Q is pressed
+            running = False
+        else:  # Returns True if R is pressed
+            reset_game()
 
     clock.tick(60)
 
