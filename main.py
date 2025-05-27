@@ -2,9 +2,11 @@ import pygame
 import random
 import os  # For path joining
 
-# Initialize Pygame
+# Initialize Pygame (mixer specifically for sound)
+pygame.mixer.pre_init(44100, -16, 2, 512)  # Optimize buffer for less delay
 pygame.init()
 pygame.font.init()
+pygame.mixer.init()
 
 # Screen dimensions
 SCREEN_WIDTH = 800
@@ -15,6 +17,25 @@ pygame.display.set_caption("Prime Porkour")
 # Asset loading
 ASSETS_DIR = "assets"
 PLAYER_IMAGE_FILENAME = "pig.png"  # Assuming you have this file
+COLLECT_PRIME_SOUND_FILENAME = "collect_prime.wav"
+GAME_OVER_SOUND_FILENAME = "game_over.wav"
+
+# Attempt to load sounds
+try:
+    collect_prime_sound = pygame.mixer.Sound(
+        os.path.join(ASSETS_DIR, COLLECT_PRIME_SOUND_FILENAME)
+    )
+except pygame.error as e:
+    print(f"Error loading {COLLECT_PRIME_SOUND_FILENAME}: {e}")
+    collect_prime_sound = None
+
+try:
+    game_over_sound = pygame.mixer.Sound(
+        os.path.join(ASSETS_DIR, GAME_OVER_SOUND_FILENAME)
+    )
+except pygame.error as e:
+    print(f"Error loading {GAME_OVER_SOUND_FILENAME}: {e}")
+    game_over_sound = None
 
 # Colors
 WHITE = (255, 255, 255)
@@ -198,8 +219,12 @@ while running:
         for number_sprite in collided_numbers:
             if number_sprite.is_prime_val:
                 score += number_sprite.value  # Add number's value if prime
+                if collect_prime_sound:
+                    collect_prime_sound.play()
                 print(f"Collected PRIME: {number_sprite.value}, Score: {score}")
             else:
+                if game_over_sound:
+                    game_over_sound.play()
                 print(f"Collected NON-PRIME: {number_sprite.value}, GAME OVER!")
                 game_over = True  # Game over if non-prime is collected
 
