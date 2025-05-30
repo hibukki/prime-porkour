@@ -67,10 +67,12 @@ main_font = pygame.font.SysFont(None, FONT_SIZE)
 
 # --- Game Configuration ---
 GROUND_Y = SCREEN_HEIGHT - 80  # Y-coordinate for the ground
+CEILING_Y = 80  # Define a ceiling position
 PLAYER_START_X = 100
 NUMBER_SPEED = 3
-PLAYER_GRAVITY = 0.8
-PLAYER_JUMP_STRENGTH = -18  # Negative because Y is 0 at top
+PLAYER_GRAVITY_STRENGTH = 0.8  # Renamed for clarity
+PLAYER_JUMP_STRENGTH_UP = -18
+PLAYER_JUMP_STRENGTH_DOWN = 18
 
 # Number spawn heights (y-coordinates)
 NUMBER_LEVEL_BOTTOM_Y = GROUND_Y - 25  # Numbers appear slightly above ground
@@ -98,6 +100,7 @@ current_spawn_delay = INITIAL_SPAWN_DELAY
 current_min_number = INITIAL_MIN_NUMBER
 current_max_number_limit = INITIAL_MAX_NUMBER
 last_difficulty_increase_score = 0
+player_gravity_direction = 1  # 1 for normal (down), -1 for reversed (up)
 
 
 # --- Helper Functions ---
@@ -114,42 +117,101 @@ def is_prime(num):
 class Player(pygame.sprite.Sprite):
     def __init__(self, *groups):
         super().__init__(*groups)
+
+        # Ensure original_image_normal and _flipped are always Surfaces
         if loaded_player_image:
-            self.image = loaded_player_image
-            self.mask = pygame.mask.from_surface(self.image)
+            self.original_image_normal = loaded_player_image
         else:
-            self.image = pygame.Surface([40, 50])
-            self.image.fill(RED)
-            self.mask = pygame.mask.from_surface(self.image)
+            # Create a fallback surface if image loading failed
+            fallback_surface = pygame.Surface([40, 50])
+            fallback_surface.fill(RED)
+            self.original_image_normal = fallback_surface
+
+        self.original_image_flipped = pygame.transform.flip(
+            self.original_image_normal, False, True
+        )
+
+        # Set initial image based on gravity
+        self.image = (
+            self.original_image_normal
+            if player_gravity_direction == 1
+            else self.original_image_flipped
+        )
+        self.mask = pygame.mask.from_surface(
+            self.image
+        )  # Now self.image is guaranteed to be a Surface
 
         self.rect = self.image.get_rect()
         self.rect.x = PLAYER_START_X
-        # Store a float for precise vertical position
-        self.y_float = float(GROUND_Y - self.rect.height)
-        self.rect.bottom = GROUND_Y  # Initial rect bottom position
 
-        self.vy = 0  # Vertical velocity
-        self.on_ground = True
+        self.y_float = 0.0
+        # self.set_initial_vertical_pos() will be called from reset_game or after gravity flip
+        # but we need a valid rect.y/rect.top/rect.bottom before that for the first placement by group.add
+        if player_gravity_direction == 1:
+            self.rect.bottom = GROUND_Y
+        else:
+            self.rect.top = CEILING_Y
+
+        self.vy = 0
+        self.on_surface = True
+
+    def set_initial_vertical_pos(self):
+        if player_gravity_direction == 1:  # Normal gravity
+            self.y_float = float(GROUND_Y - self.rect.height)
+            self.rect.bottom = GROUND_Y
+            self.image = self.original_image_normal  # Ensure correct image is set
+        else:  # Reversed gravity
+            self.y_float = float(CEILING_Y)
+            self.rect.top = CEILING_Y
+            self.image = self.original_image_flipped  # Ensure correct image is set
+        self.mask = pygame.mask.from_surface(
+            self.image
+        )  # Update mask with current image
+
+    def flip_gravity(self):
+        global player_gravity_direction
+        player_gravity_direction *= -1
+        if player_gravity_direction == 1:
+            self.y_float = float(GROUND_Y - self.rect.height)
+            self.rect.bottom = GROUND_Y
+            self.image = self.original_image_normal
+        else:
+            self.y_float = float(CEILING_Y)
+            self.rect.top = CEILING_Y
+            self.image = self.original_image_flipped
+        self.mask = pygame.mask.from_surface(self.image)
+        self.vy = 0
+        self.on_surface = True
 
     def jump(self):
-        if self.on_ground:
-            self.vy = PLAYER_JUMP_STRENGTH
-            self.on_ground = False
+        if self.on_surface:
+            if player_gravity_direction == 1:  # Normal gravity, jump up
+                self.vy = PLAYER_JUMP_STRENGTH_UP
+            else:  # Reversed gravity, jump "down"
+                self.vy = PLAYER_JUMP_STRENGTH_DOWN
+            self.on_surface = False
 
     def update(self):
-        # Apply player gravity
-        self.vy += PLAYER_GRAVITY
+        # Apply player gravity based on direction
+        self.vy += PLAYER_GRAVITY_STRENGTH * player_gravity_direction
         self.y_float += self.vy
-        self.rect.y = int(self.y_float)  # Update rect with integer part
+        self.rect.y = int(self.y_float)
 
-        # Check for ground collision
-        if self.rect.bottom >= GROUND_Y:
-            self.rect.bottom = GROUND_Y
-            self.y_float = float(self.rect.y)  # Sync float position with rect
-            self.vy = 0
-            self.on_ground = True
+        # Check for ground/ceiling collision
+        if player_gravity_direction == 1:  # Normal gravity
+            if self.rect.bottom >= GROUND_Y:
+                self.rect.bottom = GROUND_Y
+                self.y_float = float(self.rect.y)
+                self.vy = 0
+                self.on_surface = True
+        else:  # Reversed gravity
+            if self.rect.top <= CEILING_Y:
+                self.rect.top = CEILING_Y
+                self.y_float = float(self.rect.y)
+                self.vy = 0
+                self.on_surface = True
 
-        # Keep player on screen horizontally (optional, can be fixed)
+        # Keep player on screen horizontally (optional)
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > SCREEN_WIDTH:
@@ -174,11 +236,11 @@ class Number(pygame.sprite.Sprite):
         self.speed_x = NUMBER_SPEED
 
     def update(self):
-        global game_over
+        global game_over, game_won
         self.rect.x -= self.speed_x
 
         if self.rect.right < 0:  # Number has scrolled off screen to the left
-            if self.is_prime_val:
+            if self.is_prime_val and not game_over and not game_won:
                 print(f"Missed PRIME by scrolling: {self.value}, GAME OVER!")
                 if game_over_sound:
                     game_over_sound.play()
@@ -267,7 +329,7 @@ def show_win_screen():
 
 
 def reset_game():
-    global score, game_over, game_won, player
+    global score, game_over, game_won, player, player_gravity_direction
     global \
         current_spawn_delay, \
         current_min_number, \
@@ -277,6 +339,7 @@ def reset_game():
     score = 0
     game_over = False
     game_won = False
+    player_gravity_direction = 1  # Reset player gravity to normal
 
     current_spawn_delay = INITIAL_SPAWN_DELAY
     current_min_number = INITIAL_MIN_NUMBER
@@ -289,6 +352,7 @@ def reset_game():
     numbers_group.empty()
 
     player = Player()
+    player.set_initial_vertical_pos()  # Ensure correct position and orientation
     all_sprites.add(player)
 
 
@@ -301,6 +365,8 @@ while running:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     player.jump()
+                if event.key == pygame.K_f:  # 'F' to flip player gravity
+                    player.flip_gravity()
 
             if event.type == SPAWN_NUMBER_EVENT:
                 num_val = random.randint(current_min_number, current_max_number_limit)
@@ -373,6 +439,9 @@ while running:
         screen.fill(WHITE)
         # Draw a simple ground line
         pygame.draw.line(screen, BLACK, (0, GROUND_Y), (SCREEN_WIDTH, GROUND_Y), 2)
+        pygame.draw.line(
+            screen, BLACK, (0, CEILING_Y), (SCREEN_WIDTH, CEILING_Y), 2
+        )  # Draw ceiling line
         all_sprites.draw(screen)
 
         score_display = main_font.render(f"Score: {score}", True, BLACK)
