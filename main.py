@@ -17,15 +17,21 @@ ASSETS_DIR = "assets"
 PLAYER_IMAGE_FILENAME = "pig.png"
 COLLECT_PRIME_SOUND_FILENAME = "collect_prime.wav"
 GAME_OVER_SOUND_FILENAME = "game_over.wav"
+GRAVITY_FLIP_POWERUP_IMAGE_FILENAME = "gravity_crystal.png"
+POWERUP_COLLECT_SOUND_FILENAME = "powerup_collect.wav"
 # WIN_SOUND_FILENAME = "win.wav" # Optional: Add a win sound
 
 
-def load_image_scaled(filename, target_height):
+def load_image_scaled(filename, target_height, can_be_none=False):
     try:
         image_path = os.path.join(ASSETS_DIR, filename)
         if not os.path.exists(image_path):
-            # print(f"Image not found: {image_path}. Using fallback.") # Less verbose
-            return None
+            if can_be_none:
+                return None
+            print(
+                f"Required image not found: {image_path}. Using fallback if possible."
+            )
+            return None  # This should be handled by caller or lead to fallback surface
         original_image = pygame.image.load(image_path).convert_alpha()
         img_width = original_image.get_width()
         img_height = original_image.get_height()
@@ -34,25 +40,37 @@ def load_image_scaled(filename, target_height):
             original_image, (int(img_width * scale), target_height)
         )
     except (pygame.error, FileNotFoundError) as e:
-        print(f"Error loading image '{filename}': {e}. Using fallback.")
+        print(f"Error loading image '{filename}': {e}. Using fallback if possible.")
+        if can_be_none:
+            return None
         return None
 
 
-def load_sound_file(filename):
+def load_sound_file(filename, can_be_none=True):
     sound_path = os.path.join(ASSETS_DIR, filename)
     try:
         if not os.path.exists(sound_path):
-            # print(f"Sound file not found: {sound_path}") # Less verbose
+            if can_be_none:
+                return None
+            print(f"Required sound not found: {sound_path}")
             return None
         return pygame.mixer.Sound(sound_path)
     except (pygame.error, FileNotFoundError) as e:
         print(f"Error loading sound '{filename}': {e}.")
+        if can_be_none:
+            return None
         return None
 
 
 loaded_player_image = load_image_scaled(PLAYER_IMAGE_FILENAME, 50)
 collect_prime_sound = load_sound_file(COLLECT_PRIME_SOUND_FILENAME)
 game_over_sound = load_sound_file(GAME_OVER_SOUND_FILENAME)
+loaded_gravity_powerup_image = load_image_scaled(
+    GRAVITY_FLIP_POWERUP_IMAGE_FILENAME, 30, can_be_none=True
+)
+powerup_collect_sound = load_sound_file(
+    POWERUP_COLLECT_SOUND_FILENAME, can_be_none=True
+)
 # win_sound = load_sound_file(WIN_SOUND_FILENAME) # Optional
 
 # Colors
@@ -60,30 +78,36 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)  # Player fallback
 GREEN_WIN = (0, 200, 0)  # For win message
+PURPLE_POWERUP = (128, 0, 128)  # Fallback for powerup sprite
+UI_TEXT_COLOR = (50, 50, 50)
 
 # Font
 FONT_SIZE = 36
+UI_FONT_SIZE = 28
 main_font = pygame.font.SysFont(None, FONT_SIZE)
+ui_font = pygame.font.SysFont(None, UI_FONT_SIZE)
 
 # --- Game Configuration ---
-GROUND_Y = SCREEN_HEIGHT - 80  # Y-coordinate for the ground
-CEILING_Y = 80  # Define a ceiling position
+GROUND_Y = SCREEN_HEIGHT - 70
 PLAYER_START_X = 100
 NUMBER_SPEED = 3
-PLAYER_GRAVITY_STRENGTH = 0.8  # Renamed for clarity
+POWERUP_SPEED = 2.5
+PLAYER_GRAVITY_STRENGTH = 0.8
 PLAYER_JUMP_STRENGTH_UP = -18
 PLAYER_JUMP_STRENGTH_DOWN = 18
 
-# Number spawn heights (y-coordinates)
-NUMBER_LEVEL_BOTTOM_Y = GROUND_Y - 25  # Numbers appear slightly above ground
-NUMBER_LEVEL_TOP_Y = GROUND_Y - 150  # Higher level for numbers
+# Define Number spawn heights first
+NUMBER_LEVEL_BOTTOM_Y = GROUND_Y - 35
+NUMBER_LEVEL_TOP_Y = GROUND_Y - 180
+CEILING_Y = NUMBER_LEVEL_TOP_Y - 60  # Now correctly defined after NUMBER_LEVEL_TOP_Y
 
 WIN_SCORE = 3000
 
 # Difficulty Scaling Parameters
-INITIAL_SPAWN_DELAY = 1700  # Start a bit slower
+INITIAL_SPAWN_DELAY = 1700
 MIN_SPAWN_DELAY = 600
 SPAWN_DELAY_DECREMENT = 75
+POWERUP_SPAWN_CHANCE = 0.1  # 10% chance a powerup spawns instead of a number
 
 INITIAL_MIN_NUMBER = 10
 INITIAL_MAX_NUMBER = 99
@@ -100,7 +124,8 @@ current_spawn_delay = INITIAL_SPAWN_DELAY
 current_min_number = INITIAL_MIN_NUMBER
 current_max_number_limit = INITIAL_MAX_NUMBER
 last_difficulty_increase_score = 0
-player_gravity_direction = 1  # 1 for normal (down), -1 for reversed (up)
+player_gravity_direction = 1
+has_gravity_flip_charge = False  # New state for power-up
 
 
 # --- Helper Functions ---
@@ -168,20 +193,24 @@ class Player(pygame.sprite.Sprite):
             self.image
         )  # Update mask with current image
 
-    def flip_gravity(self):
-        global player_gravity_direction
-        player_gravity_direction *= -1
-        if player_gravity_direction == 1:
-            self.y_float = float(GROUND_Y - self.rect.height)
-            self.rect.bottom = GROUND_Y
-            self.image = self.original_image_normal
-        else:
-            self.y_float = float(CEILING_Y)
-            self.rect.top = CEILING_Y
-            self.image = self.original_image_flipped
-        self.mask = pygame.mask.from_surface(self.image)
-        self.vy = 0
-        self.on_surface = True
+    def attempt_flip_gravity(self):
+        global player_gravity_direction, has_gravity_flip_charge
+        if has_gravity_flip_charge:
+            player_gravity_direction *= -1
+            if player_gravity_direction == 1:
+                self.y_float = float(GROUND_Y - self.rect.height)
+                self.rect.bottom = GROUND_Y
+                self.image = self.original_image_normal
+            else:
+                self.y_float = float(CEILING_Y)
+                self.rect.top = CEILING_Y
+                self.image = self.original_image_flipped
+            self.mask = pygame.mask.from_surface(self.image)
+            self.vy = 0
+            self.on_surface = True
+            has_gravity_flip_charge = False  # Consume the charge
+            return True
+        return False
 
     def jump(self):
         if self.on_surface:
@@ -248,20 +277,47 @@ class Number(pygame.sprite.Sprite):
             self.kill()
 
 
+class GravityFlipPowerUp(pygame.sprite.Sprite):
+    def __init__(self, *groups):
+        super().__init__(*groups)
+        if loaded_gravity_powerup_image:
+            self.image = loaded_gravity_powerup_image
+        else:
+            self.image = pygame.Surface([25, 25])
+            self.image.fill(PURPLE_POWERUP)
+            pygame.draw.circle(self.image, WHITE, (12, 12), 8, 2)
+        self.rect = self.image.get_rect()
+        self.mask = pygame.mask.from_surface(self.image)
+        self.x_float = float(
+            SCREEN_WIDTH + random.randrange(100, 300)
+        )  # Store x as float
+        self.rect.x = int(self.x_float)
+        self.rect.centery = random.choice([NUMBER_LEVEL_TOP_Y, NUMBER_LEVEL_BOTTOM_Y])
+        self.speed_x = POWERUP_SPEED
+
+    def update(self):
+        self.x_float -= self.speed_x
+        self.rect.x = int(self.x_float)  # Assign int part to rect.x
+        if self.rect.right < 0:
+            self.kill()
+
+
 # --- Sprite Groups ---
 all_sprites = pygame.sprite.Group()
 numbers_group = pygame.sprite.Group()
+powerups_group = pygame.sprite.Group()  # New group for power-ups
 
 player = Player()
 all_sprites.add(player)
 
 # --- Timers ---
-SPAWN_NUMBER_EVENT = pygame.USEREVENT + 1
-pygame.time.set_timer(SPAWN_NUMBER_EVENT, 1500)  # Adjust spawn rate as needed
+SPAWN_EVENT = pygame.USEREVENT + 1  # Renamed, as it spawns numbers OR powerups
+pygame.time.set_timer(SPAWN_EVENT, 1500)  # Adjust spawn rate as needed
 
 # --- Game Loop ---
 running = True
 clock = pygame.time.Clock()
+reset_game()
 
 
 def show_game_over_screen():
@@ -329,30 +385,33 @@ def show_win_screen():
 
 
 def reset_game():
-    global score, game_over, game_won, player, player_gravity_direction
+    global \
+        score, \
+        game_over, \
+        game_won, \
+        player, \
+        player_gravity_direction, \
+        has_gravity_flip_charge
     global \
         current_spawn_delay, \
         current_min_number, \
         current_max_number_limit, \
         last_difficulty_increase_score
-
     score = 0
     game_over = False
     game_won = False
-    player_gravity_direction = 1  # Reset player gravity to normal
-
+    player_gravity_direction = 1
+    has_gravity_flip_charge = False
     current_spawn_delay = INITIAL_SPAWN_DELAY
     current_min_number = INITIAL_MIN_NUMBER
     current_max_number_limit = INITIAL_MAX_NUMBER
     last_difficulty_increase_score = 0
-
-    pygame.time.set_timer(SPAWN_NUMBER_EVENT, current_spawn_delay)
-
+    pygame.time.set_timer(SPAWN_EVENT, current_spawn_delay)
     all_sprites.empty()
     numbers_group.empty()
-
+    powerups_group.empty()
     player = Player()
-    player.set_initial_vertical_pos()  # Ensure correct position and orientation
+    player.set_initial_vertical_pos()
     all_sprites.add(player)
 
 
@@ -365,15 +424,27 @@ while running:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     player.jump()
-                if event.key == pygame.K_f:  # 'F' to flip player gravity
-                    player.flip_gravity()
+                if event.key == pygame.K_f:  # Only one block for K_f
+                    if player.attempt_flip_gravity():
+                        if powerup_collect_sound:
+                            powerup_collect_sound.play()
 
-            if event.type == SPAWN_NUMBER_EVENT:
-                num_val = random.randint(current_min_number, current_max_number_limit)
-                level_choice = random.choice(["top", "bottom"])
-                new_number = Number(num_val, level_choice)
-                all_sprites.add(new_number)
-                numbers_group.add(new_number)
+            if event.type == SPAWN_EVENT:
+                if (
+                    random.random() < POWERUP_SPAWN_CHANCE
+                    and not has_gravity_flip_charge
+                ):  # Only spawn if no charge held
+                    new_powerup = GravityFlipPowerUp()
+                    all_sprites.add(new_powerup)
+                    powerups_group.add(new_powerup)
+                else:
+                    num_val = random.randint(
+                        current_min_number, current_max_number_limit
+                    )
+                    level_choice = random.choice(["top", "bottom"])
+                    new_number = Number(num_val, level_choice)
+                    all_sprites.add(new_number)
+                    numbers_group.add(new_number)
 
     if not game_over and not game_won:
         all_sprites.update()
@@ -401,6 +472,15 @@ while running:
                 game_over = True
                 break  # Stop checking collisions if game over
 
+        collided_powerups = pygame.sprite.spritecollide(
+            player, powerups_group, True, pygame.sprite.collide_mask
+        )
+        for _ in collided_powerups:  # Don't care which powerup, only one type for now
+            has_gravity_flip_charge = True
+            if powerup_collect_sound:
+                powerup_collect_sound.play()
+            print("Gravity Flip Charge COLLECTED!")
+
         if game_over:  # Check again in case collision caused game over
             if not show_game_over_screen():
                 running = False
@@ -422,7 +502,7 @@ while running:
                 current_spawn_delay = max(
                     MIN_SPAWN_DELAY, current_spawn_delay - SPAWN_DELAY_DECREMENT
                 )
-                pygame.time.set_timer(SPAWN_NUMBER_EVENT, current_spawn_delay)
+                pygame.time.set_timer(SPAWN_EVENT, current_spawn_delay)
                 print(f"Difficulty UP! Spawn delay: {current_spawn_delay}ms")
 
                 # Increase number range
