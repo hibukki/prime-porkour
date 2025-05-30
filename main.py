@@ -305,21 +305,15 @@ class GravityFlipPowerUp(pygame.sprite.Sprite):
 # --- Sprite Groups ---
 all_sprites = pygame.sprite.Group()
 numbers_group = pygame.sprite.Group()
-powerups_group = pygame.sprite.Group()  # New group for power-ups
-
-player = Player()
-all_sprites.add(player)
+powerups_group = pygame.sprite.Group()
+player = Player()  # Initialized early for type checking, re-initialized in reset_game
 
 # --- Timers ---
-SPAWN_EVENT = pygame.USEREVENT + 1  # Renamed, as it spawns numbers OR powerups
-pygame.time.set_timer(SPAWN_EVENT, 1500)  # Adjust spawn rate as needed
-
-# --- Game Loop ---
-running = True
-clock = pygame.time.Clock()
-reset_game()
+SPAWN_EVENT = pygame.USEREVENT + 1
+# Timer itself is set within reset_game, so no pygame.time.set_timer here.
 
 
+# --- Screen Display Functions ---
 def show_game_over_screen():
     screen.fill(BLACK)
     game_over_text = main_font.render("GAME OVER", True, RED)
@@ -410,10 +404,15 @@ def reset_game():
     all_sprites.empty()
     numbers_group.empty()
     powerups_group.empty()
-    player = Player()
+    player = Player()  # Re-assign player instance
     player.set_initial_vertical_pos()
     all_sprites.add(player)
 
+
+# --- Game Loop (Initialization and Main Loop) ---
+running = True
+clock = pygame.time.Clock()  # Initialize clock here
+reset_game()  # Initialize/reset game state here, after all definitions
 
 while running:
     for event in pygame.event.get():
